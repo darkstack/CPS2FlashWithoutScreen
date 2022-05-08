@@ -10,11 +10,7 @@
 // Version 1.06: [Eduardo] Added back clones to avoid user confusion. Added ssf2tba, xmcotab. Thanks Brian & smf.
 //               [Artemio] Modified clock signal order for improved compatibility with board revs 4 & 5
 // Version 1.07: [Eduardo] Fixed keys for batcirj, spf2t, previously broken again in 1.06. Thanks Konosuke.
-                 
-#include <LiquidCrystal.h>
-
-// initialize the library with the numbers of the interface pins
-LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
+// Version 1.08: Remove LCD display, flash with a button. 
 
 //  CPS2 Board CN9 interface pins
 #define DATA        2   //CN9 #2 
@@ -22,23 +18,18 @@ LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
 #define CLOCK       11  //CN9 #4
 #define SETUP2      12  //CN9 #5
 
+
+//BUTTON 
+#define BUTTON_TEST_PIN 8
+
 //  CPS2 Board without CN9, CN2 interface pins
 //  ------------------------------------------
 //  DATA    ->  CN2 A32
 //  SETUP1  ->  CN2 A30
 //  CLOCK   ->  CN2 A31
 //  SETUP2  ->  CN2 A29
+//
 
-#define btnRIGHT  0
-#define btnUP     1
-#define btnDOWN   2
-#define btnLEFT   3
-#define btnSELECT 4
-#define btnNONE   5
-
-int lcd_key       = btnNONE;
-int adc_key_in    = 0;
-int adc_key_prev  = 0;
 
 // delay amount
 int time = 25;
@@ -545,43 +536,49 @@ char buffer[20];
 
 unsigned char mask = 1; // Bit 
 unsigned char bits[8];
-int c = -1;
 
+//Game to flash (offset by 2 for game_name (p:0 / p0:1) 
+int game_to_flash = -1;
+
+bool flashing = false;
 
 void DisplayIntro()
 {
-  lcd.begin(16, 2);
-  lcd.setCursor(0,0);
-  lcd.print("CPS2 Desuicide");
-  lcd.setCursor(0,1);
-  lcd.print("By ArcadeHacker");
-  delay(2500);
+  digitalWrite(LED_BUILTIN, HIGH);
+  delay(1000);
+  digitalWrite(LED_BUILTIN, LOW);
+  delay(1000);
+  digitalWrite(LED_BUILTIN, HIGH);
+  delay(1000);
+  digitalWrite(LED_BUILTIN, LOW);
 }
 
-void DisplayMenu()
-{
-  lcd.setCursor(0,0);
-  lcd.print("Select a game:  ");
-  lcd.setCursor(0,1);
-  lcd.print(" --press down-- ");
+void blink(){
+  digitalWrite(LED_BUILTIN, HIGH);
+  delay(200);
+  digitalWrite(LED_BUILTIN, LOW);
 }
 
 void PrepareOutput()
 {
   pinMode(SETUP1, OUTPUT); pinMode(SETUP2, OUTPUT);
   pinMode(CLOCK, OUTPUT); pinMode(DATA, OUTPUT); 
-
+  
   digitalWrite(SETUP1, LOW);
   digitalWrite(CLOCK, LOW);
   digitalWrite(DATA, LOW);
   digitalWrite(SETUP2, HIGH);
+
+  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(BUTTON_TEST_PIN, INPUT);
+  digitalWrite(LED_BUILTIN, LOW); 
 }
 
 void setup() {
   PrepareOutput();
   
   DisplayIntro();
-  DisplayMenu();
+  //DisplayMenu();
 }
 
 
@@ -592,6 +589,7 @@ void CLK()
   digitalWrite(CLOCK, LOW); 
   delay(time);  
 }
+
 
 void program_unlock()
 {
@@ -607,16 +605,11 @@ void ProgramCPS2(int prg)
   unsigned char cByte;
 
   
-  lcd.clear();
-  lcd.setCursor(0,1);
-  lcd.print("Unlocking...    ");                  
+  blink();              
   
   program_unlock();      
   
-  lcd.setCursor(0,0);   
-  lcd.print("Programming     ");
-  lcd.setCursor(0,1);
-  lcd.print("CPS2...        %");    
+  blink();
   
   //Serial.begin(9600);
   
@@ -625,9 +618,6 @@ void ProgramCPS2(int prg)
     cByte =  pgm_read_byte_near(Keys[prg]+i);
     //Serial.print(cByte, HEX);
     //Serial.print(' ');
-
-    lcd.setCursor(13,1);
-    lcd.print(i*5, DEC);  
     
     for (int b = 7; b > -1; b--) {  
       bits[b] = (cByte & (mask << b)) != 0;
@@ -646,150 +636,25 @@ void ProgramCPS2(int prg)
   delay(time);
   digitalWrite(CLOCK, LOW);
   
-  lcd.clear();
-  lcd.setCursor(0,1);
-  lcd.print("Done!           ");                   
+  DisplayIntro();              
   delay(1000);       
-  
-  
-  //while (analogRead (0) != 638) { 
-    lcd.setCursor(0,0); lcd.print("--disconnect and ");   lcd.setCursor(0,1); lcd.print("test pcb--"); 
-  //}
-  delay(2000); 
 }
 
-int read_LCD_buttons()
+bool read_button()
 {
-  adc_key_in = analogRead(0);   
-  delay(5);
-  int k = (analogRead(0) - adc_key_in); 
-  if (5 < abs(k)) return btnNONE;  
+  return digitalRead(BUTTON_TEST_PIN)==LOW;
   
-  if (adc_key_in > 1000) return btnNONE; 
-  if (adc_key_in < 50)   return btnRIGHT;  
-  if (adc_key_in < 195)  return btnUP; 
-  if (adc_key_in < 380)  return btnDOWN; 
-  if (adc_key_in < 555)  return btnLEFT; 
-  if (adc_key_in < 790)  return btnSELECT;   
-  
-  return btnNONE;  
-}     
-
-void DisplayName(int game)
-{
-  int len = 0, i = 0;
-
-  if(c == -1)
-    return;
-  lcd.setCursor(0,1);            // move to the begining of the second line
-  strcpy_P(buffer, (char*)pgm_read_word(&(GameList[c]))); 
-  len = strlen(buffer);
-  for(i = len; i < 16; i++)
-    buffer[i] = ' ';
-  buffer[i] = '\0';
-  lcd.print(buffer);
 }
 
-int FindNextIndex(int pos, int dir)
+void loop()
 {
-  int TempIndex = pos, found = -1;
-  int comp = 4; // 3 and 4 work well, both with disadvantages
-  int listsize =  sizeof(GameList)/sizeof(GameList[0])-1;
-
-  if(pos == -1)
-    return 0;
-  
-  strncpy_P(buffer, (char*)pgm_read_word(&(GameList[pos])), comp);
-  if(strlen(buffer) == 3) // Adjust for msh
-    comp = 3;
-  do
-  {
-    if(dir)
-    {
-      if(TempIndex < listsize)
-        TempIndex++;
-    }
-    else
-    {
-      if(TempIndex > 0)
-        TempIndex--;
-    }
-  
-    found = strncmp_P(buffer, (char*)pgm_read_word(&(GameList[TempIndex])), comp);
-  }while(found == 0 && TempIndex < listsize && TempIndex != 0);
-
-  return TempIndex;
-}
-
-void loop()   /*----( LOOP: RUNS CONSTANTLY )----*/
-{
-  int listsize =  sizeof(GameList)/sizeof(GameList[0])-1;
-  adc_key_prev = lcd_key ;       // Looking for changes
-  lcd_key = read_LCD_buttons();  // read the buttons
-  
-  if (adc_key_prev != lcd_key)
-  { 
-    switch (lcd_key)               // depending on which button was pushed, we perform an action
-    {
-      case btnRIGHT:
+      if( read_button())
       {
-        /*
-        if (c+10 < listsize)
-          c += 10;
-        else
-          c = listsize;
-        */
-        c = FindNextIndex(c, 1);
-        break;
-      }
-      
-      case btnLEFT:
-      {
-        /*
-        if (c > 10)
-          c -= 10;
-        else
-          c = 0;    
-        */ 
-        c = FindNextIndex(FindNextIndex(c, 0), 0); // Calling it once gets the last item.
-        if(c) c++; // Get First Item in category
-        break;
-      }
-      
-      case btnUP:
-      {
-        if (c !=0)
+        DisplayIntro();
+        if (game_to_flash != -1) 
         {
-          if (c > 0) {c--;} else {c++;}
-        }
-        break;
-      }
-      
-      case btnDOWN:
-      {
-        if (c != listsize) 
-          {c++;}
-        break;
-      }
-      
-      case btnSELECT:
-      {
-        if (c != -1) 
-        {
-          ProgramCPS2(c);  
-
-          lcd_key = btnNONE;
-          do
-          {
-            lcd_key = read_LCD_buttons();  // read the buttons
-          }while(lcd_key == btnNONE);
-          
+          ProgramCPS2(game_to_flash);  
           PrepareOutput();
-          DisplayMenu();
         }
-        break;
       }
-    }
-    DisplayName(c);
-  }
 }
